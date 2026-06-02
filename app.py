@@ -1,12 +1,16 @@
+"""
+Flames of war combat calculator using a binomial chain approach.
+The user can input the number of shots, the to hit threshold, the save threshold and the fire power threshold. 
+The app will then simulate the combat and output the expected number of hits and kills, 
+as well as the probability distribution of hits and kills. 
+The app also calculates the probability of achieving
+certain thresholds of hits and kills, such as the chance of getting 5+ hits or 2+ kills.
+"""
+
 import streamlit as st
 import numpy as np
-from math import comb
 
 st.title("Flames of war Combat Calculator (Binomial Chain)")
-
-# --- Helpers ---
-def binom_pmf(n, k, p):
-    return comb(n, k) * (p**k) * ((1-p)**(n-k))
 
 def to_prob(label):
     return {
@@ -16,14 +20,15 @@ def to_prob(label):
         "4+": 3/6,
         "5+": 2/6,
         "6+": 1/6,
-        "7+": 0.0
+        "7+": 0.0,
+        "8+": 0.0
     }[label]
 
 # --- Inputs ---
 shots = st.slider("Number of shots", 1, 50, 20)
 
-#TODO: some special rules for to hit when 7 or 8 is needed example: 7+ it is hit on a 6 and then roll again only a 5+ will it be hit
-to_hit = st.selectbox("To hit", ["2+", "3+", "4+", "5+", "6+"])
+#INFO: some special rules for to hit when 7 or 8 is needed example: 7+ it is hit on a 6 and then roll again only a 5+ will it be hit
+to_hit = st.selectbox("To hit", ["2+", "3+", "4+", "5+", "6+", "7+", "8+"])
 st.write("Save (inf / armor) 7+ means it cannot be saved")
 to_save = st.selectbox("Save (inf / armor)", ["1+", "2+", "3+", "4+", "5+", "6+", "7+"])
 to_fire_power = st.selectbox("Fire power", ["1+", "2+", "3+", "4+", "5+", "6+"])
@@ -35,12 +40,22 @@ p_fail_save = 1 - to_prob(to_save)
 # --- Monte Carlo (simple + robust) ---
 TRIALS = 50000
 
-hits = np.random.binomial(shots, p_hit, TRIALS)
-failed_saves = np.random.binomial(hits, p_fail_save)
-if (to_save == "1+"):
-    kills = np.zeros(TRIALS, dtype=int)
+if to_hit in ["7+", "8+"]:
+    reroll_target = 5 if to_hit == "7+" else 6
+
+    first_rolls = np.random.randint(1, 7, (TRIALS, shots))
+
+    # only successful "6s" proceed
+    valid = (first_rolls == 6)
+
+    second_rolls = np.random.randint(1, 7, (TRIALS, shots))
+
+    hits = np.sum(valid & (second_rolls >= reroll_target), axis=1)
 else:
-    kills = np.random.binomial(failed_saves, p_fire_power)
+    hits = np.random.binomial(shots, p_hit, TRIALS)
+
+failed_saves = np.random.binomial(hits, p_fail_save)
+kills = np.random.binomial(failed_saves, p_fire_power)
 
 # -----------------
 # Results

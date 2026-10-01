@@ -1,106 +1,139 @@
-# Proposed MVC architecture
+# Proposed architecture: Flames of War V4 shooting resolution
 
-## Purpose and scope
+## Purpose and boundaries
 
-This is a structural proposal for separating the existing Streamlit calculator into Model, View, and Controller responsibilities. It does not approve, revise, or extend the game's rules. The calculation behavior described in `app.py` and audited in `doc/rules-spec.md` is the compatibility baseline. Any future change to rule interpretation still requires an explicit, accepted rules specification.
+This is a design proposal for evolving the calculator from its present abstract binomial chain into a user-input-driven V4 shooting-resolution calculator. Users already know the tabletop situation and enter its relevant facts; the app does not identify weapons or units from a database or catalog. The architecture does not implement rules or decide any item marked `UNRESOLVED` in `doc/rules-spec.md`. Future rule behavior must be specified there, with verified facts, assumptions, and unresolved questions distinguished, and accepted by the Lead Agent before implementation. `IMPLEMENTATION_CONFLICT` entries describe behavior in the existing app that the architecture expects later approved rule implementation to replace; they are not themselves a complete replacement specification.
 
-The Model should be callable without Streamlit so that `pytest` can exercise it directly. Keep the first separation modest: one model module, one controller module, one Streamlit view module, and the existing `app.py` as the composition/entry point.
+This proposal separates domain calculation from Streamlit and allows calculation to be run deterministically without UI or global random state. It recommends introducing richer domain types and modules incrementally, retaining the current MVC boundary as the application shell.
 
-## Proposed structure
+## Evidence and classification key
+
+- **[VERIFIED_V4]** is a rule or procedure explicitly supported by the verified material recorded in `doc/rules-spec.md` (the V4 Quick Reference Sheet and its cited V4 FAQ clarification). The listed rulebook page references and qualifications remain those in that document.
+- **[PROJECT CONCEPT]** names an existing calculator concept or a domain entity needed to express the audited procedure. It is not by itself a game-rule claim.
+- **[ARCHITECTURE]** is a software design recommendation, not a rule interpretation.
+- **[UNRESOLVED V4]** marks dependencies the available rules audit does not settle. No default or behavior is proposed for them.
+
+## Proposed package structure
 
 ```text
-app.py                         # Streamlit entry point / composition root
+app.py                              # Streamlit composition root
 src/fow_combat/
     __init__.py
-    model.py                   # Input/result data types and combat simulation
-    controller.py              # Application use case: call model for current input
-    view.py                    # Streamlit widgets and result rendering
-tests/
-    test_model.py              # Model behavior, owned by Test & Math Verification
+    application/
+        commands.py                 # Input command / use-case request types
+        shooting_service.py         # Orchestrates one requested resolution
+        ports.py                    # RNG protocols
+    domain/
+        inputs.py                   # Direct shot count and user-provided situation facts
+        shooting.py                 # Current shooting situation and specified hit resolution
+        resolution.py               # Aggregate resolution result and probability distributions
+    adapters/
+        streamlit_view.py            # Widgets and result display
+        numpy_rng.py                 # Production random-source adapter
+    reporting/
+        summaries.py                 # Histograms and presentation-independent summaries
+ tests/
+    ...                              # Owned and derived by verification role when requested
 ```
 
-These are proposed paths; the `src/fow_combat/` and `tests/` directories do not currently exist.
+**[ARCHITECTURE]** The initial implementation need not create every file at once. Keep dependencies pointing inward: Streamlit and NumPy adapters depend on application/domain contracts; domain modules depend on other domain contracts only. The application service coordinates domain operations, while the domain has no Streamlit imports, display formatting, or direct calls to a global random generator. Avoid a single `model.py` becoming a second monolith; split modules when an accepted behavior has a clear owner.
 
-## Responsibilities
+## Domain model and responsibilities
 
-### Model — `src/fow_combat/model.py`
+### User-provided situation facts and firing context
 
-- Define the calculator's input data contract, for example a frozen `CombatInput` containing shots, To Hit label, save label, and Firepower label.
-- Define a result contract, for example `CombatResult` containing per-trial hit and kill counts and the trial count. Keep arrays available for the current observed min/max and histogram presentation; derived summary values may be exposed as model properties or a separate immutable summary type.
-- Own `to_prob` and the existing Monte Carlo calculation, including current 7+/8+ hit handling, generic failed-save calculation, Firepower calculation, and 50,000-trial default.
-- Have no Streamlit imports, UI side effects, or reads from widget state. Put random-number access behind an injectable RNG/source parameter so model tests can make runs repeatable. The production default must retain unseeded behavior and the same outcome distributions.
-- Do not reinterpret rules or silently normalize inputs. The supported inputs and semantics remain those in the existing app and the accepted rules specification.
+- **[ARCHITECTURE]** The user directly enters the total number of shots and Firepower, along with relevant current-situation facts such as To Hit value/modifier information, long-range status, target concealed, target dug in, Gone to Ground, save/armour facts, and other inputs the product requests. These facts are entered directly; the app does not identify a weapon or unit, consult a weapon/unit database or army list, calculate shots from model count × ROF, or require the user to build a weapon profile.
+- **[PROJECT CONCEPT]** `ShootingInput` (or an equivalent small request type) carries the direct shot count, Firepower, and user-provided situation facts. It does not need `Weapon`, `WeaponProfile`, `RateOfFire`, firing-mode selection, or a weapon catalog. `dug_in`, `concealed`, and `gone_to_ground` remain distinct user facts and must not be derived from one another.
+- **[ARCHITECTURE]** An explicit Rules Expert-owned applicability mapping in the accepted V4 rules specification determines which supplied facts affect which resolution stages, and under what conditions. The application preserves the input facts separately from applicable modifiers and rule-derived results. It must not infer stage applicability in widgets, generic parsing, or domain defaults.
+- **[UNRESOLVED V4]** The applicability and interaction of To Hit/modifiers, long range, Concealed, Dug In, Gone to Ground, saves, Firepower, and other context must be specified before the corresponding V4 calculation is enabled. Direct entry of a fact does not itself mean it modifies a particular stage.
 
-The model is isolated from application I/O for practical pytest testing. With an injected deterministic random source it is repeatable; without injection it retains the current stochastic behavior. This makes the computation independently testable without turning it into a different game model.
+### Target facts and hit modifiers
 
-### Controller — `src/fow_combat/controller.py`
+- **[PROJECT CONCEPT]** Represent target class/state and other relevant facts as direct situation inputs when requested. No unit identification or profile retrieval is assumed. A target identity input is needed only if an accepted rule requires it.
+- **[VERIFIED_V4]** The current audit records the V4 hit modifiers: +1 for range over 16in/40cm, Concealed but not Gone to Ground, shooter Out of Command, smoke, or night; +2 for Concealed and Gone to Ground. It also records sequencing inputs including range, line of sight, concealment, target declaration, and shooting eligibility.
+- **[ARCHITECTURE]** The accepted V4 specification owns an explicit input-to-stage applicability mapping. Represent user-provided facts separately from rule-derived applicability decisions; preserve applicable decisions and reasons in the result. Inputs such as range, concealment, Dug In, Gone to Ground, command, smoke, and night must not automatically modify a stage merely because they were supplied.
+- **[UNRESOLVED V4]** The audit does not fully specify how every target-state, weapon-specific, scenario, or special-rule circumstance enters the calculation. Modifier eligibility and precedence beyond listed verified cases must remain behind policies whose behavior is enabled only by accepted specification.
+- **[UNRESOLVED V4]** The relationship, if any, between a user-reported `dug_in` fact and concealment, Gone to Ground, To Hit, or another resolution stage is not established by the current rules specification. Preserve it as an independent fact; the Rules Expert must specify its applicability and conditions before any policy uses it.
+- **[UNRESOLVED V4]** The existing helper's `1+` To Hit mapping is explicitly unresolved. Do not expose it as an available domain result or assign it game semantics absent a specification.
 
-- Provide a small use-case function such as `calculate(input: CombatInput) -> CombatResult`.
-- Apply application defaults such as the current trial count and call the Model.
-- Remain independent of Streamlit so orchestration can be tested with ordinary Python tests if useful.
-- Avoid duplicating probability or game-rule logic already owned by the Model.
+### To Hit and random die outcomes
 
-### View — `src/fow_combat/view.py`
+- **[VERIFIED_V4]** An ordinary target from 2+ through 6+ corresponds to its unmodified single-D6 success probability. For 7+ the V4 procedure is 6 followed by 5+; for 8+ it is 6 followed by 6.
+- **[ARCHITECTURE]** `ToHitTarget` should be a typed user-entered value, not a UI string. A pure `ToHitCalculator` receives that fact and the accepted policy's applicable inputs; a `HitResolver` consumes a `DieRoller` port and emits one `ShotOutcome` per shot. For 7+/8+, model the gated second roll as part of that shot's recorded roll sequence, rather than replacing it with an approximate probability. A sequence of shot outcomes supports audit, allocation, and deterministic replay.
+- **[PROJECT CONCEPT]** Preserve probability reporting as a derived summary where useful, but do not make a probability-only binomial draw the domain event if the application needs per-shot allocation and traces.
 
-- Own Streamlit widgets, labels, layout, and presentation of results.
-- Collect the same shot, To Hit, save, and Firepower values with the current options, bounds, and defaults.
-- Render the same metrics, histograms, pinned-hit labels, and kill threshold summaries from a `CombatResult`.
-- Avoid implementing probabilities or sampling in the UI.
+### Saves and outcome types
 
-### Entry point — `app.py`
+- **[VERIFIED_V4]** V4 has distinct Armour Save and Other Save procedures. Armour resolution uses armour rating, Anti-tank, and the recorded range condition; its outcomes include bail out or destruction depending on comparisons. Other Saves depend on target class and can directly destroy on a failed save in some cases.
+- **[ARCHITECTURE]** Represent save facts and outcomes only to the extent required by the accepted specification. Select a save procedure from supplied situation facts only where accepted rules specify the branch. Do not model every save as one generic threshold or collapse distinct outcomes into “kill.”
+- **[UNRESOLVED V4]** The intended target class and outcome represented by the current generic save selector are unresolved. Branch selection, all save modifiers, and details not established by the audit remain blocked on a rules specification. Keep those as explicit missing/unknown input rather than a default save type.
 
-- Keep `app.py` as the Streamlit launch target and composition root.
-- Set the page title, ask the View for the current input, pass it to the Controller, and ask the View to display the returned result.
-- Contain no combat mathematics. It can remain short and make the app's data flow explicit.
+### Firepower
 
-## Data flow and dependencies
+- **[VERIFIED_V4]** Firepower is invoked only in specified resolution branches, including recorded armour and Other Save cases. It is not an unconditional check after every failed save. When called, its threshold test is a D6 test.
+- **[ARCHITECTURE]** `FirepowerResolver` accepts a typed `Firepower` value and an explicit eligible resolution context; it returns a typed success/failure result and die trace. The caller/branch policy decides whether Firepower applies, and must be derived from accepted rules. Keep its interface unable to silently run for every failure.
+- **[UNRESOLVED V4]** The audit leaves unspecified the intended circumstance for the current generic Firepower test. Do not bind that selector to a save category or resolution branch until specified.
+
+### Pinning
+
+- **[PROJECT CONCEPT]** Pinning probability distributions, including the desired probabilities of reaching 5 hits and 8 hits for a big platoon, are product outputs. The existing V1.0.0 threshold presentation is a desired output shape, not authority for V4 eligibility or hit-pool semantics.
+- **[ARCHITECTURE]** Report pinning distributions from the same shot-resolution outcomes used for hit distributions. Keep threshold labels and their calculation inputs explicit so the accepted rules specification can define when each is meaningful. Do not require a unit profile or team-count catalog to produce the requested distribution interface.
+- **[UNRESOLVED V4]** The meaning of “big platoon,” whether the 5/8 thresholds apply to this product's situation, which hits count, and pinning eligibility/exclusions are unresolved for V4 output. The Rules Expert must specify these before labeling or presenting the distributions as V4 pinning probabilities.
+
+### Additional V4 inputs
+
+- **[ARCHITECTURE]** Keep the MVP domain model small. Add only the situation inputs and stage calculations required by the accepted rules specification and requested outputs; do not introduce a general special-rule framework, weapon catalog, or abstractions for unsupported cases.
+- **[UNRESOLVED V4]** Other special rules and their interactions are not established by the audit. Add them only when specified and needed by the product.
+
+## Application and Streamlit interface
+
+**[ARCHITECTURE]** Keep `app.py` as the composition root. `streamlit_view.py` gathers the user's current-situation facts into an application command and renders a completed result. It must not calculate probabilities, decide rule applicability, choose game-rule branches, or call the RNG. The application service validates the command, passes the entered facts through rules-owned applicability policies, invokes only specified resolution stages, and returns an immutable `ShootingResolution` suitable for rendering. Each input is applied at a stage only when the accepted V4 specification says it applies under the supplied conditions. Input-to-rule mapping belongs behind that policy/specification boundary, not in widgets, generic input parsing, or an implicit catalog.
+
+A proposed flow is:
 
 ```text
 app.py
-  ├── View: render inputs → CombatInput
-  ├── Controller: calculate(CombatInput) → CombatResult
-  │     └── Model: simulate(CombatInput, trials, rng) → CombatResult
-  └── View: render results(CombatResult)
+  -> StreamlitView.collect_command() -> ShootingCommand
+  -> ShootingService.resolve(command, dependencies) -> ShootingResolution
+       -> rules-owned applicability/context preparation
+       -> direct shot count -> specified To Hit resolution
+       -> specified save and Firepower resolution
+       -> hit, pinning, and kill distributions where defined
+  -> StreamlitView.render(resolution)
 ```
 
-The dependency direction is one-way: `app.py` composes View and Controller; Controller depends on Model; View depends on the Model's input/result data contracts for annotations and rendering. The Model depends on NumPy and standard Python only. Neither Model nor Controller imports Streamlit. Do not make the Model call the View or Controller.
+The stages shown define architectural seams, not a claim that every branch or ordering detail is completely specified. User-entered facts do not imply applicability: for example, entering long range, concealed, Dug In, armour/save details, or Firepower does not itself determine which calculations they affect. `dug_in` remains distinct from `concealed` and `gone_to_ground`, and its applicability is unresolved pending Rules Expert specification. The application must not run a downstream stage when its required game-rule condition is unresolved. The UI requests the current-situation facts needed by accepted rules and outputs, and must not present an underspecified result as complete V4 output. Probability distributions for hits/pinning and kills are desired outputs, alongside the desired 5-hit and 8-hit pin probabilities; V4 meanings, eligible contexts, and thresholds are enabled only as specified by the Rules Expert. Presentation summaries derive from the same resolution outcomes.
 
-The View should return a `CombatInput` value rather than pass Streamlit widget state deeper into the application. The Controller should return the Model's result without changing its statistical meaning. Keep UI formatting, such as rounding displayed means and percentages, in the View unless a pure summary type is useful to make those presentation values straightforward to test.
+The current widgets and calculations are the V1.0.0 baseline. Migration may temporarily retain that explicitly named legacy/abstract behavior, but it must not be presented as V4 shooting until applicable V4 behavior is specified and implemented. The product's direct shot-count and Firepower inputs remain the input model.
 
-## Compatibility requirements
+## Randomness and deterministic testing
 
-The initial extraction should preserve the existing user-visible and mathematical behavior:
+- **[ARCHITECTURE]** Inject a `RandomSource`/`DieRoller` interface at the application boundary. A minimal domain-facing contract supplies a D6 result; production uses an adapter backed by NumPy or another selected source. No domain function reads global random state.
+- Each resolution command may receive a seed or a supplied random-source instance. Seed handling belongs to the adapter/application layer; results can include a replayable seed or roll trace according to product needs. Avoid passing a NumPy-specific API into domain modules.
+- Pure calculations (modifier aggregation, target selection, branch selection, summaries) need no randomness and should be tested as ordinary deterministic functions.
+- Deterministic resolver tests inject queued die results and verify the sequence, branch gates, and emitted events. Mathematical verification derives expected results independently from the accepted rules specification. Statistical tests, if later required, should be separate, seeded, and tolerance-based; do not use simulation estimates as the expected-value oracle.
+- **[UNRESOLVED V4]** Randomness does not resolve any game-rule ambiguity. A seeded simulation of an unspecified volley, save type, Firepower branch, or pinning pool remains semantically unspecified.
 
-- Shot slider range 1–50 and default 20; To Hit, save, and Firepower choices and defaults remain as currently declared.
-- Keep 50,000 unseeded simulation trials by default.
-- Keep the current basic target conversion and 7+/8+ two-roll hit procedure.
-- Keep the current generic failed-save and Firepower stages, independent binomial sampling, and their existing ordering.
-- Keep hit/kill means, observed sample min/max, distributions, and the 5+, 8+, 2+, and 5+ threshold displays with current labels and rounding.
-- Preserve the helper's 1+ conversion even though it is not exposed in the current UI, unless a separate approved change says otherwise.
+## Migration from current implementation
 
-This is compatibility with the current project implementation, not a claim that every calculation step is a complete Flames of War V4 procedure. In particular, the existing generic save/Firepower chain and threshold labels retain their audited project assumptions and conflicts. Structural extraction must not use the opportunity to resolve them implicitly.
+1. Preserve `src/fow_combat/model.py`, `controller.py`, `view.py`, and `app.py` as the V1.0.0 abstract-chain baseline while establishing the small situation-input and resolution contracts. The present implementation samples hits, generic failed saves, and generic Firepower kills; current tests verify that abstraction, not full V4 procedure.
+2. Extract shared types and introduce injected D6 randomness without changing the existing model's behavior. Keep any compatibility API clearly named/documented as legacy abstraction; do not silently change its output labels or claim V4 conformance through refactoring.
+3. Add user-input contracts for current-situation facts as product requirements and accepted rules require. Do not add a weapon/unit catalog dependency. Keep user facts distinct from rule-derived applicability; keep missing data explicit and reject or mark incomplete commands instead of inventing defaults.
+4. Implement one fully specified resolution stage at a time, with separate owner-assigned rules specification, domain implementation, and independently derived verification. Route each stage through the service while retaining the old path until a replacement is accepted and reviewed.
+5. Replace conflicting UI controls and outputs only under later explicit rules implementation work. In particular, generic save/Firepower, aggregate pinning tails, and “kills” must not be re-labeled as V4 outcomes without specified domain semantics.
+6. Remove the compatibility path only after product acceptance and the test/verification role has established the replacement behavior. No migration step authorizes a rule interpretation by itself.
 
-## pytest fit and test boundaries
+## Unresolved rule dependencies and design boundaries
 
-`tests/test_model.py` should test the Model through its public input/result contract and an injected deterministic random source. Test the current target-to-probability mapping, 7+/8+ hit behavior, the failed-save and Firepower stages, output lengths, histogram counts summing to the trial count, and threshold-tail calculations where those are exposed as pure model summaries. Keep UI rendering outside these tests. If the model uses RNG operations that are difficult to control with a seeded generator, define a small random-source interface or inject a compatible NumPy RNG; do not add Streamlit as a test dependency for model tests.
-
-The Test & Math Verification Agent owns `tests/**` and must derive expected values independently from the accepted rules specification and mathematical reasoning. The Developer may expose the model contract and implement it but must not define its own tests' expected values. Exact probability identities and deterministic draws can verify the chain without relying on noisy Monte Carlo means. Tests of Monte Carlo estimates should use justified tolerances and avoid flaky assertions.
-
-## File ownership
-
-| Files | Owner | Boundary |
+| Unresolved item from `doc/rules-spec.md` | Boundary affected | Required treatment |
 |---|---|---|
-| `doc/architecture.md` | Software Architect | Module boundaries and interface proposal only. |
-| `doc/rules-spec.md` | Flames of War Rules Expert | Rule evidence, classifications, and unresolved rule questions. |
-| `app.py`, `src/fow_combat/**` | Python Developer | Entry point, Model, Controller, View, and integration, constrained by the accepted rule specification. |
-| `tests/**` | Test & Math Verification Agent | Independent model tests and math verification; no production-code edits. |
-| `AGENTS.md`, `.codex/config.toml`, `.codex/agents/lead.toml` | Lead Agent | Workflow configuration and coordination. |
+| Whether V4 outcomes require a defined target/volley topology or per-Unit hit pool | Save resolution and pinning distribution interpretation | Keep any dependent V4 output incomplete until specified; direct total shot count remains the user input. |
+| Target class for generic save and intended outcome | Save resolver selection and result vocabulary | No generic-to-V4 mapping; retain separate save contexts and require specified target facts. |
+| Circumstance for generic Firepower | Firepower branch policy | No unconditional invocation or assumed branch. |
+| Meaning of “big platoon,” pinning eligibility, and hits counted for pinning | Pinning probability distribution and 5/8 threshold labels | Preserve the desired output, but do not present a V4 interpretation until specified; do not infer from a label or team count. |
+| Target state, any applicable weapon-specific rules, and range/terrain circumstances | Eligibility and modifier applicability | Add only individually specified facts and policies; the product does not require a weapon profile or catalog. |
+| `1+` To Hit helper | To Hit target type and UI options | Do not assign V4 semantics; exclude pending explicit resolution. |
 
-The Lead assigns any integration edit to the Developer and should ask the Architect to update this document when the accepted structure or contracts change. Ownership is a collaboration rule; it is not a filesystem access control.
+## Existing implementation conflicts
 
-## Decisions to confirm during implementation
-
-- Choose the concrete names and fields for `CombatInput` and `CombatResult` while keeping the contract small and typed.
-- Select a NumPy RNG injection shape that supports deterministic model tests and preserves unseeded production use.
-- Decide whether histograms and threshold tails are pure Model outputs or are derived in the View. Keep them deterministic and based on the same sampled counts either way; do not resample to render separate statistics.
-- Decide the import/install arrangement for the proposed `src` layout so both `streamlit run app.py` and `pytest` resolve `fow_combat` consistently. This is packaging plumbing, not a reason to alter combat behavior.
+The current code's fixed To Hit selector, generic save threshold, unconditional failed-save-to-Firepower-to-kill chain, aggregate hit pool, and “infantry platoon”/“big infantry platoon” thresholds are documented as `IMPLEMENTATION_CONFLICT` or `UNRESOLVED` in the audit. This architecture identifies the components where later implementation can replace those behaviors; it does not itself authorize or specify the replacement. Existing behavior remains historical project behavior, not an accepted V4 specification.

@@ -2,7 +2,7 @@
 
 ## Purpose and boundaries
 
-This is a design proposal for evolving the calculator from its present abstract binomial chain into a user-input-driven V4 shooting-resolution calculator. Users already know the tabletop situation and enter its relevant facts; the app does not identify weapons or units from a database or catalog. The architecture does not implement rules or decide any item marked `UNRESOLVED` in `doc/rules-spec.md`. Future rule behavior must be specified there, with verified facts, assumptions, and unresolved questions distinguished, and accepted by the Lead Agent before implementation. `IMPLEMENTATION_CONFLICT` entries describe behavior in the existing app that the architecture expects later approved rule implementation to replace; they are not themselves a complete replacement specification.
+This document describes both the current implementation and a design proposal for evolving the calculator from its present abstract binomial chain into a user-input-driven V4 shooting-resolution calculator. Users already know the tabletop situation and enter its relevant facts; the app does not identify weapons or units from a database or catalog. The architecture does not implement rules or decide any item marked `UNRESOLVED` in `doc/rules-spec.md`. Future rule behavior must be specified there, with verified facts, assumptions, and unresolved questions distinguished, and accepted by the Lead Agent before implementation. `IMPLEMENTATION_CONFLICT` entries describe behavior in the existing app that the architecture expects later approved rule implementation to replace; they are not themselves a complete replacement specification.
 
 This proposal separates domain calculation from Streamlit and allows calculation to be run deterministically without UI or global random state. It recommends introducing richer domain types and modules incrementally, retaining the current MVC boundary as the application shell.
 
@@ -13,7 +13,7 @@ This proposal separates domain calculation from Streamlit and allows calculation
 - **[ARCHITECTURE]** is a software design recommendation, not a rule interpretation.
 - **[UNRESOLVED V4]** marks dependencies the available rules audit does not settle. No default or behavior is proposed for them.
 
-## Proposed package structure
+## Proposed package structure (PLANNED)
 
 ```text
 app.py                              # Streamlit composition root
@@ -38,6 +38,20 @@ src/fow_combat/
 
 **[ARCHITECTURE]** The initial implementation need not create every file at once. Keep dependencies pointing inward: Streamlit and NumPy adapters depend on application/domain contracts; domain modules depend on other domain contracts only. The application service coordinates domain operations, while the domain has no Streamlit imports, display formatting, or direct calls to a global random generator. Avoid a single `model.py` becoming a second monolith; split modules when an accepted behavior has a clear owner.
 
+## Current implementation snapshot (IMPLEMENTED)
+
+The actual application is smaller than the proposed structure above. `app.py` imports `controller.calculate` and the rendering functions from `view.py`. The controller delegates to `model.simulate`; that legacy model owns the abstract hit/save/Firepower binomial chain and imports NumPy. The Streamlit view owns widgets and presentation summaries and imports NumPy for histograms. The `domain` package currently contains typed input facts (`ShootingSituation`, conditions, target and save facts), typed To Hit and Firepower thresholds, and a `DieRoller` protocol. No current application path consumes those domain structures to calculate V4 outcomes. There is no implemented application service, V4 resolver, adapter, hit-allocation, pinning, save, or kill-distribution module.
+
+The actual domain input objects do not require weapon or Unit identity. `shots` is entered directly; `ShootingConditions` preserves battlefield flags separately; `TargetSituation.team_count` can represent the 12+ Teams criterion and other relevant target facts; `SaveSituation` can represent explicit but possibly incomplete save facts. These structures carry facts only and do not implement their rule effects. The existing Streamlit UI still uses the legacy `CombatInput` (`shots`, string To Hit, save, Firepower) and does not expose the new domain situation.
+
+The diagrams below use **IMPLEMENTED** for code that exists, **PLANNED** for architecture proposed here, and **UNRESOLVED** for rule-dependent stages blocked by `doc/rules-spec.md`. PlantUML source is maintained only in `doc/uml/`:
+
+- [System context](uml/system-context.puml)
+- [Components and layers](uml/components.puml)
+- [V1.0.0 calculation flow](uml/calculation-flow.puml)
+- [Domain input model](uml/domain-model.puml)
+- [Python module dependencies](uml/python-dependencies.puml)
+
 ## Domain model and responsibilities
 
 ### User-provided situation facts and firing context
@@ -45,15 +59,15 @@ src/fow_combat/
 - **[ARCHITECTURE]** The user directly enters the total number of shots and Firepower, along with relevant current-situation facts such as To Hit value/modifier information, long-range status, target concealed, target dug in, Gone to Ground, save/armour facts, and other inputs the product requests. These facts are entered directly; the app does not identify a weapon or unit, consult a weapon/unit database or army list, calculate shots from model count × ROF, or require the user to build a weapon profile.
 - **[PROJECT CONCEPT]** `ShootingInput` (or an equivalent small request type) carries the direct shot count, Firepower, and user-provided situation facts. It does not need `Weapon`, `WeaponProfile`, `RateOfFire`, firing-mode selection, or a weapon catalog. `dug_in`, `concealed`, and `gone_to_ground` remain distinct user facts and must not be derived from one another.
 - **[ARCHITECTURE]** An explicit Rules Expert-owned applicability mapping in the accepted V4 rules specification determines which supplied facts affect which resolution stages, and under what conditions. The application preserves the input facts separately from applicable modifiers and rule-derived results. It must not infer stage applicability in widgets, generic parsing, or domain defaults.
-- **[UNRESOLVED V4]** The applicability and interaction of To Hit/modifiers, long range, Concealed, Dug In, Gone to Ground, saves, Firepower, and other context must be specified before the corresponding V4 calculation is enabled. Direct entry of a fact does not itself mean it modifies a particular stage.
+- **[UNRESOLVED V4]** Full input-to-stage applicability and interactions outside the verified cases must be specified before the corresponding V4 calculation is enabled. Direct entry of a fact does not itself mean it modifies a particular stage; the verified Dug In-to-Concealed cases are described below.
 
 ### Target facts and hit modifiers
 
 - **[PROJECT CONCEPT]** Represent target class/state and other relevant facts as direct situation inputs when requested. No unit identification or profile retrieval is assumed. A target identity input is needed only if an accepted rule requires it.
 - **[VERIFIED_V4]** The current audit records the V4 hit modifiers: +1 for range over 16in/40cm, Concealed but not Gone to Ground, shooter Out of Command, smoke, or night; +2 for Concealed and Gone to Ground. It also records sequencing inputs including range, line of sight, concealment, target declaration, and shooting eligibility.
-- **[ARCHITECTURE]** The accepted V4 specification owns an explicit input-to-stage applicability mapping. Represent user-provided facts separately from rule-derived applicability decisions; preserve applicable decisions and reasons in the result. Inputs such as range, concealment, Dug In, Gone to Ground, command, smoke, and night must not automatically modify a stage merely because they were supplied.
+- **[ARCHITECTURE]** The accepted V4 specification owns an explicit input-to-stage applicability mapping. Represent user-provided facts separately from rule-derived applicability decisions; preserve applicable decisions and reasons in the result. Inputs such as range, concealment, Dug In, Gone to Ground, command, smoke, and night must not automatically modify a stage merely because they were supplied. In particular, Dug In is not an independent To Hit modifier; apply the verified concealment relationship only when its stated conditions hold.
 - **[UNRESOLVED V4]** The audit does not fully specify how every target-state, weapon-specific, scenario, or special-rule circumstance enters the calculation. Modifier eligibility and precedence beyond listed verified cases must remain behind policies whose behavior is enabled only by accepted specification.
-- **[UNRESOLVED V4]** The relationship, if any, between a user-reported `dug_in` fact and concealment, Gone to Ground, To Hit, or another resolution stage is not established by the current rules specification. Preserve it as an independent fact; the Rules Expert must specify its applicability and conditions before any policy uses it.
+- **[VERIFIED_V4]** Dug In is not itself a To Hit modifier. It can make particular Infantry or man-packed/medium Gun Teams Concealed under the applicable conditions; retain `dug_in` independently and do not infer `concealed` without the required Team/context facts (see `doc/rules-spec.md`).
 - **[UNRESOLVED V4]** The existing helper's `1+` To Hit mapping is explicitly unresolved. Do not expose it as an available domain result or assign it game semantics absent a specification.
 
 ### To Hit and random die outcomes
@@ -76,9 +90,9 @@ src/fow_combat/
 
 ### Pinning
 
-- **[PROJECT CONCEPT]** Pinning probability distributions, including the desired probabilities of reaching 5 hits and 8 hits for a big platoon, are product outputs. The existing V1.0.0 threshold presentation is a desired output shape, not authority for V4 eligibility or hit-pool semantics.
-- **[ARCHITECTURE]** Report pinning distributions from the same shot-resolution outcomes used for hit distributions. Keep threshold labels and their calculation inputs explicit so the accepted rules specification can define when each is meaningful. Do not require a unit profile or team-count catalog to produce the requested distribution interface.
-- **[UNRESOLVED V4]** The meaning of “big platoon,” whether the 5/8 thresholds apply to this product's situation, which hits count, and pinning eligibility/exclusions are unresolved for V4 output. The Rules Expert must specify these before labeling or presenting the distributions as V4 pinning probabilities.
+- **[VERIFIED_V4]** A Unit reaches the Pinned Down threshold at 5 total hits, or 8 total hits if it has at least 12 Teams. Armoured Tank Teams and Aircraft cannot be Pinned Down. “Big platoon” is not the rule criterion; use the target Unit Team count where this context is represented.
+- **[ARCHITECTURE]** The target facts can be supplied directly, without a Unit identity or profile lookup. Any pinning distribution interface should keep its target context and cumulative hit basis explicit; the thresholds and ineligibility facts are already specified in `doc/rules-spec.md`.
+- **[UNRESOLVED V4]** The hit allocation and target/volley grouping needed to derive a pinning probability, the mapping from shot outcomes to Unit-allocated hits, and the treatment of prior/cumulative hits remain unspecified. Do not report the legacy whole-volley hit tails as V4 pinning probabilities.
 
 ### Additional V4 inputs
 
@@ -102,7 +116,7 @@ app.py
   -> StreamlitView.render(resolution)
 ```
 
-The stages shown define architectural seams, not a claim that every branch or ordering detail is completely specified. User-entered facts do not imply applicability: for example, entering long range, concealed, Dug In, armour/save details, or Firepower does not itself determine which calculations they affect. `dug_in` remains distinct from `concealed` and `gone_to_ground`, and its applicability is unresolved pending Rules Expert specification. The application must not run a downstream stage when its required game-rule condition is unresolved. The UI requests the current-situation facts needed by accepted rules and outputs, and must not present an underspecified result as complete V4 output. Probability distributions for hits/pinning and kills are desired outputs, alongside the desired 5-hit and 8-hit pin probabilities; V4 meanings, eligible contexts, and thresholds are enabled only as specified by the Rules Expert. Presentation summaries derive from the same resolution outcomes.
+The stages shown define architectural seams, not a claim that every branch or ordering detail is completely specified. User-entered facts do not imply applicability: for example, entering long range, concealed, Dug In, armour/save details, or Firepower does not itself determine which calculations they affect. `dug_in` remains distinct from `concealed` and `gone_to_ground`; the rules spec describes when Dug In can make particular Teams Concealed, but applicability depends on the actual Team type and situation or on entering the resolved Concealed fact. The application must not run a downstream stage when its required game-rule condition is unresolved. The UI requests the current-situation facts needed by accepted rules and outputs, and must not present an underspecified result as complete V4 output. Probability distributions for hits/pinning and kills are desired outputs. The 5/8 pinning thresholds and pinning ineligibility facts are specified; deriving V4 pinning probabilities still depends on unresolved allocation and hit-pool semantics. Presentation summaries derive from the same resolution outcomes.
 
 The current widgets and calculations are the V1.0.0 baseline. Migration may temporarily retain that explicitly named legacy/abstract behavior, but it must not be presented as V4 shooting until applicable V4 behavior is specified and implemented. The product's direct shot-count and Firepower inputs remain the input model.
 
@@ -130,7 +144,7 @@ The current widgets and calculations are the V1.0.0 baseline. Migration may temp
 | Whether V4 outcomes require a defined target/volley topology or per-Unit hit pool | Save resolution and pinning distribution interpretation | Keep any dependent V4 output incomplete until specified; direct total shot count remains the user input. |
 | Target class for generic save and intended outcome | Save resolver selection and result vocabulary | No generic-to-V4 mapping; retain separate save contexts and require specified target facts. |
 | Circumstance for generic Firepower | Firepower branch policy | No unconditional invocation or assumed branch. |
-| Meaning of “big platoon,” pinning eligibility, and hits counted for pinning | Pinning probability distribution and 5/8 threshold labels | Preserve the desired output, but do not present a V4 interpretation until specified; do not infer from a label or team count. |
+| Hit allocation, target/volley grouping, and prior/cumulative hit pool for pinning probability | Pinning probability distribution | Apply the verified 5-hit / 8-for-at-least-12-Teams threshold and verified ineligibility facts, but keep probabilities incomplete until hit allocation and cumulative pool semantics are specified. |
 | Target state, any applicable weapon-specific rules, and range/terrain circumstances | Eligibility and modifier applicability | Add only individually specified facts and policies; the product does not require a weapon profile or catalog. |
 | `1+` To Hit helper | To Hit target type and UI options | Do not assign V4 semantics; exclude pending explicit resolution. |
 

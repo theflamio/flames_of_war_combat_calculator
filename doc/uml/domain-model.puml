@@ -1,0 +1,73 @@
+@startuml
+title Implemented V1.0.0 domain input structures
+skinparam classAttributeIconSize 0
+
+class ShootingSituation <<IMPLEMENTED>> {
+  +shots: int
+  +firepower: FirepowerTarget
+  +to_hit: ToHitTarget
+  +conditions: ShootingConditions
+  +target: TargetSituation
+  +save: SaveSituation
+}
+class ShootingConditions <<IMPLEMENTED>> {
+  +long_range: bool
+  +concealed: bool
+  +dug_in: bool
+  +gone_to_ground: bool
+  +shooter_out_of_command: bool
+  +shooting_through_smoke: bool
+  +at_night: bool
+}
+class TargetSituation <<IMPLEMENTED>> {
+  +team_count: int | None
+  +armoured_tank_team: bool
+  +aircraft: bool
+  +bulletproof_cover: bool
+}
+class SaveSituation <<IMPLEMENTED>> {
+  +procedure: SaveProcedure | None
+  +other_save_target: OtherSaveTarget | None
+  +armour_rating: int | None
+  +anti_tank: int | None
+  +gun_shield: bool
+  +recce: bool
+}
+enum ToHitTarget <<IMPLEMENTED>> {
+  TWO_PLUS through EIGHT_PLUS
+}
+enum FirepowerTarget <<IMPLEMENTED>> {
+  ONE_PLUS through SIX_PLUS
+}
+enum SaveProcedure <<IMPLEMENTED>> {
+  ARMOUR
+  OTHER
+}
+enum OtherSaveTarget <<IMPLEMENTED>> {
+  INFANTRY
+  HEAVY_WEAPONS
+  CAVALRY
+  UNARMOURED_TANK
+  UNARMOURED_TANK_GUN_SHIELD
+  RECCE_UNARMOURED_TANK
+  AIRCRAFT
+}
+interface DieRoller <<IMPLEMENTED protocol>> {
+  +roll_d6(): int
+}
+
+ShootingSituation *-- ShootingConditions
+ShootingSituation *-- TargetSituation
+ShootingSituation *-- SaveSituation
+ShootingSituation --> ToHitTarget
+ShootingSituation --> FirepowerTarget
+SaveSituation --> SaveProcedure
+SaveSituation --> OtherSaveTarget
+
+note bottom
+Input structures hold user-supplied facts; they do not resolve
+modifiers, allocate hits, select missing save context, or calculate
+probabilities. team_count is optional and can express 12+ Teams.
+No Weapon or Unit identity is modeled or required.
+end note
+@enduml

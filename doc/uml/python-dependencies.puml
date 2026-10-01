@@ -1,0 +1,41 @@
+@startuml
+title Actual Python module dependencies (IMPLEMENTED)
+left to right direction
+skinparam componentStyle rectangle
+
+component "app.py" as App
+component "src.fow_combat.view" as View
+component "src.fow_combat.controller" as Controller
+component "src.fow_combat.model" as Model
+package "src.fow_combat.domain" {
+  component "domain.__init__" as DomainInit
+  component "domain.inputs" as Inputs
+  component "domain.to_hit" as ToHit
+  component "domain.firepower" as Firepower
+  component "domain.dice" as Dice
+}
+component "Streamlit" as Streamlit
+component "NumPy" as NumPy
+
+App --> Controller : imports calculate
+App --> View : imports render_inputs/render_results
+App --> Streamlit : title
+View --> Model : CombatInput / CombatResult
+View --> Streamlit : widgets and layout
+View --> NumPy : arrays and summary stats
+Controller --> Model : types + simulate
+Model --> NumPy : random draws and arrays
+DomainInit --> Inputs
+DomainInit --> ToHit
+DomainInit --> Firepower
+DomainInit --> Dice
+Inputs --> ToHit
+Inputs --> Firepower
+
+note bottom of DomainInit
+No import edge connects the current legacy MVC
+simulation path to domain input types.
+There are no implemented service, V4 calculation,
+or adapter modules in src/fow_combat.
+end note
+@enduml

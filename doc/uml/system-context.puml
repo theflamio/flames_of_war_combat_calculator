@@ -1,0 +1,31 @@
+@startuml
+title Flames of War V4 Calculator — system context
+left to right direction
+skinparam componentStyle rectangle
+
+actor User
+rectangle "Flames of War Combat Calculator" {
+  component "Streamlit application\n(app.py + view.py)\nIMPLEMENTED: legacy UI" as App
+  component "Legacy abstract simulation\n(model.py + controller.py)\nIMPLEMENTED" as Legacy
+  component "V1.0.0 shooting situation\ndomain input types\nIMPLEMENTED: data contracts only" as Domain
+  component "V4 probability resolution\nPLANNED / UNRESOLVED" as V4
+}
+cloud "Python runtime" as Python
+database "NumPy\nrandom sampling + arrays" as NumPy
+
+User --> App : enters legacy controls / views results
+App --> Legacy : CombatInput; calculate
+Legacy --> App : CombatResult
+App --> Domain : no current call path
+Domain ..> V4 : intended input foundation
+V4 ..> App : future result integration
+Legacy --> NumPy : simulation draws
+App --> NumPy : histogram/statistics
+Legacy ..> Python
+App ..> Python
+
+note bottom of V4
+No implemented V4 calculator consumes ShootingSituation.
+No weapon/unit database or identity service exists or is required.
+end note
+@enduml

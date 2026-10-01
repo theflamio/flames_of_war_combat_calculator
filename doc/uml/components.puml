@@ -1,0 +1,41 @@
+@startuml
+title Components and layers — current and proposed
+top to bottom direction
+skinparam componentStyle rectangle
+
+package "Presentation / entry point" {
+  component "app.py\nStreamlit entry point\nIMPLEMENTED" as Entry
+  component "view.py\nwidgets + rendering\nIMPLEMENTED" as View
+}
+package "Application" {
+  component "controller.py\ncalculate(CombatInput, rng)\nIMPLEMENTED: legacy delegation" as Controller
+  component "ShootingService\nPLANNED" as Service
+}
+package "Domain" {
+  component "model.py\nCombatInput / CombatResult\nabstract simulation\nIMPLEMENTED: legacy" as Model
+  component "domain/inputs.py\nShootingSituation + facts\nIMPLEMENTED: data only" as Inputs
+  component "domain/to_hit.py\nToHitTarget\nIMPLEMENTED: typed value" as ToHit
+  component "domain/firepower.py\nFirepowerTarget\nIMPLEMENTED: typed value" as Firepower
+  component "domain/dice.py\nDieRoller protocol\nIMPLEMENTED: port only" as Dice
+  component "hit distribution / pinning / save / kill resolvers\nPLANNED; rule stages UNRESOLVED" as Resolvers
+}
+component "NumPy\nIMPLEMENTED external dependency" as NumPy
+
+Entry --> View : render_inputs / render_results
+Entry --> Controller : calculate
+View --> Model : CombatInput / CombatResult
+Controller --> Model : simulate
+Model --> NumPy : sampling
+View --> NumPy : histogram + mean/min/max
+Inputs --> ToHit
+Inputs --> Firepower
+Service ..> Inputs : future orchestration
+Service ..> Resolvers : future orchestration
+Resolvers ..> Dice : planned injected roll port
+
+note right of Inputs
+No Weapon or Unit identity object.
+No current dependency from legacy MVC
+to these V4 input value types.
+end note
+@enduml

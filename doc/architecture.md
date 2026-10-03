@@ -40,7 +40,7 @@ src/fow_combat/
 
 ## Current implementation snapshot (IMPLEMENTED)
 
-The actual application is smaller than the proposed structure above. `app.py` imports `controller.calculate` and the rendering functions from `view.py`. The controller delegates to `model.simulate`; that legacy model owns the abstract hit/save/Firepower binomial chain and imports NumPy. The Streamlit view owns widgets and presentation summaries and imports NumPy for histograms. The `domain` package currently contains typed input facts (`ShootingSituation`, conditions, target and save facts), typed To Hit and Firepower thresholds, and a `DieRoller` protocol. No current application path consumes those domain structures to calculate V4 outcomes. There is no implemented application service, V4 resolver, adapter, hit-allocation, pinning, save, or kill-distribution module.
+The application currently has two separate paths. Normal Shooting uses `app.py -> view.py -> controller.calculate -> model.simulate`; that legacy model owns the abstract hit/save/Firepower binomial chain and imports NumPy. The Streamlit view owns its widgets and presentation summaries and imports NumPy for histograms. The separate Artillery Shooting page uses `app.py -> artillery_view.render_page -> artillery_controller.calculate_artillery_use_case -> artillery.calculate_artillery`; the artillery resolver uses the `domain.dice.DieRoller` port and a nation-specific rules registry. The `domain` package also contains the existing direct-shooting data-only inputs and typed To Hit and Firepower thresholds. The direct-shooting domain values do not drive either current UI path. No general direct-fire V4 resolver or hit-allocation module is implemented; artillery V1 implements only its explicitly supported Infantry bombardment calculation and exposes incomplete outputs as described below.
 
 The actual domain input objects do not require weapon or Unit identity. `shots` is entered directly; `ShootingConditions` preserves battlefield flags separately; `TargetSituation.team_count` can represent the 12+ Teams criterion and other relevant target facts; `SaveSituation` can represent explicit but possibly incomplete save facts. These structures carry facts only and do not implement their rule effects. The existing Streamlit UI still uses the legacy `CombatInput` (`shots`, string To Hit, save, Firepower) and does not expose the new domain situation.
 
@@ -151,3 +151,41 @@ The current widgets and calculations are the V1.0.0 baseline. Migration may temp
 ## Existing implementation conflicts
 
 The current code's fixed To Hit selector, generic save threshold, unconditional failed-save-to-Firepower-to-kill chain, aggregate hit pool, and “infantry platoon”/“big infantry platoon” thresholds are documented as `IMPLEMENTATION_CONFLICT` or `UNRESOLVED` in the audit. This architecture identifies the components where later implementation can replace those behaviors; it does not itself authorize or specify the replacement. Existing behavior remains historical project behavior, not an accepted V4 specification.
+
+## Artillery Shooting V1 (IMPLEMENTED WITH EXPLICIT LIMITS)
+
+Artillery is a separate UI and calculation path. The current `app.py` sidebar selects Normal Shooting or Artillery Shooting. The normal option continues to call `view.render_inputs`, `controller.calculate`, and `view.render_results`; the artillery option imports and calls `artillery_view.render_page`. This keeps the legacy normal calculator independent of artillery inputs and resolution.
+
+### Implemented modules and interfaces
+
+```text
+app.py
+  -> src/fow_combat/artillery_view.py::render_page
+       -> collect_command() -> ArtilleryCommand
+       -> artillery_controller.calculate_artillery_use_case(...)
+            -> artillery.calculate_artillery(...)
+                 -> ArtilleryRulesRegistry.for_nation(...)
+                 -> DieRoller.roll_d6()
+            -> ArtilleryResult
+       -> render(result, infantry_teams_under_template)
+```
+
+`src/fow_combat/artillery.py` contains `ShootingNation`, `RangeIn`, `ArtilleryCommand`, the `NationArtilleryRules` protocol, `ArtilleryRulesRegistry`, `ArtilleryResult`, Firepower adjustment, and the Monte Carlo resolver. The controller wrapper in `artillery_controller.py` forwards the command, registry, injected `DieRoller`, and trial count. `artillery_view.py` owns Streamlit collection/rendering and supplies a `secrets`-backed D6 source; the resolver itself has no Streamlit or NumPy dependency. The result includes sampled hits and casualties, the adjusted Firepower, optional pin probability, applied rule labels, and an `incomplete_items` list.
+
+`ArtilleryCommand` carries Shooting Nation, Infantry Teams under the template, guns firing, Artillery To Hit, Firepower, Range In stage, same-Unit confirmation, Repeat Bombardment spotter visibility, and `selected_rules` as a set of `ArtilleryRule` identifiers. It intentionally has no target-nation field, vehicle target, weapon profile, or unit database identity. `ShootingNation` is the firing force. The registry currently supports United States, United Kingdom, and Japan policies. Other / unsupported nation selection is present in the UI enum but has no registry entry and returns an unsupported-policy error. `ArtilleryRulesRegistry.available_unit_rules(nation, range_in)` returns the allowed labeled choices for that scenario; the resolver validates selected identifiers against that list.
+
+### Supported and incomplete behavior
+
+The resolver implements the accepted `doc/rules-spec.md` artillery behavior it models: the first/second/third/Repeat To Hit adjustments; the 1–2-gun successful-hit re-roll and 5+-gun failed-hit re-roll; individual To Hit rolls per Infantry Team under the template; ordinary exposed Infantry 3+ saves; Repeat Bombardment and declared US Time on Target successful-save re-roll behavior; Japanese Fire Bursts and Banners conditions; and the V4 artillery Firepower profile adjustment table. The selected nation policy is passed into the domain resolver through `ArtilleryRulesRegistry`; nation-specific effects are not implemented in the Streamlit layer. The simulation resolves one bombardment scenario and stops after the supplied Infantry Teams receive hit/save resolution. Repeat Bombardment is selected as the scenario's Range In state, not an automatic repeat loop across turns.
+
+Pinning is reported only when the user confirms all teams under the template belong to the same Unit. In that case the sampled hit distribution is compared against the artillery one-hit pin threshold, or the two-hit Japanese Banners threshold. Without that confirmation `pin_probability` and threshold remain `None`, and the view explains the missing same-Unit condition. This condition is necessary because pinning is a Unit state; the app does not infer grouping from template count.
+
+Individual Infantry Team casualties are reported from failed saves against the ordinary 3+ Infantry save. Unit/Formation destruction and Last Stand remain unresolved and are not reported as V1 outputs. The implementation records the Firepower profile and adjusted value but does not roll Firepower against ordinary exposed Infantry, consistent with the audited save branch. It cannot derive Unit/Formation destruction or Last Stand from the template count alone. Other listed limitations are returned in `incomplete_items`: unsupported defensive exceptions (including unmodeled non-terrain cover interactions) and weapon rules such as Brutal; incomplete national rules (including British Mike Target coordination); and the scope is limited to ordinary exposed Infantry. The overlap of Repeat Bombardment and Time on Target remains unresolved in the rule spec and is explicitly withheld by the UI for a Repeat scenario.
+
+The nation rules registry is a deliberately small verified-policy boundary, not a complete rules catalog. The UI asks the registry for available Unit-rule options and renders them generically; it contains no nation-specific rule conditionals. Selection remains explicit because nationality alone does not establish that a Unit has Time on Target, Fire Bursts, or Banners. UK Mike Target coordinates separate batteries and is outside this single-bombardment flow. Nations without an implemented, verified V1 policy must not inherit another policy; currently they fail explicitly.
+
+### Remaining planned architecture and rule dependencies
+
+This V1 is implemented in a compact module and has not been split into a general artillery target hierarchy, multiple resolver stages, or per-nation files. Keep that simple structure unless a concrete extension needs the split. The original proposed structure above for application services/adapters is a broader architecture direction, not a description of current artillery code. Vehicle targets remain out of scope; a future target abstraction may be introduced when another target category is actually implemented.
+
+The rules spec leaves Bad Spirit / Unit Last Stand application, Formation destruction after casualties, and destruction caused by this bombardment unresolved for calculator output. It also leaves broader nation-specific rule coverage and repeat/Time on Target overlapping re-roll semantics unresolved. Do not extend resolver behavior into those cases without a rules-spec update and acceptance. The existing tests currently cover the normal legacy chain and direct-shooting domain contract; artillery-specific verification is not yet represented in `tests/`. Future tests should be independently derived from the accepted rules specification by the Test & Math Verification role. The existing UML diagrams do not yet show the implemented artillery flow and remain candidates for a separate diagram update.

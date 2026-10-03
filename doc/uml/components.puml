@@ -1,41 +1,47 @@
 @startuml
-title Components and layers — current and proposed
+title Components and layers — implemented Normal and Artillery paths
 top to bottom direction
 skinparam componentStyle rectangle
 
 package "Presentation / entry point" {
-  component "app.py\nStreamlit entry point\nIMPLEMENTED" as Entry
-  component "view.py\nwidgets + rendering\nIMPLEMENTED" as View
+  component "app.py\nStreamlit navigation" as Entry
+  component "view.py\nNormal Shooting widgets/results" as NormalView
+  component "artillery_view.py\nartillery inputs/results" as ArtilleryView
 }
 package "Application" {
-  component "controller.py\ncalculate(CombatInput, rng)\nIMPLEMENTED: legacy delegation" as Controller
-  component "ShootingService\nPLANNED" as Service
+  component "controller.py\ncalculate(CombatInput)" as NormalController
+  component "artillery_controller.py\ncalculate_artillery_use_case(command, registry)" as ArtilleryController
 }
 package "Domain" {
-  component "model.py\nCombatInput / CombatResult\nabstract simulation\nIMPLEMENTED: legacy" as Model
-  component "domain/inputs.py\nShootingSituation + facts\nIMPLEMENTED: data only" as Inputs
-  component "domain/to_hit.py\nToHitTarget\nIMPLEMENTED: typed value" as ToHit
-  component "domain/firepower.py\nFirepowerTarget\nIMPLEMENTED: typed value" as Firepower
-  component "domain/dice.py\nDieRoller protocol\nIMPLEMENTED: port only" as Dice
-  component "hit distribution / pinning / save / kill resolvers\nPLANNED; rule stages UNRESOLVED" as Resolvers
+  component "model.py\nlegacy abstract binomial chain" as LegacyModel
+  component "artillery.py\nArtilleryCommand + exact probability-state transitions\nArtilleryResult / ShootingResult" as ArtilleryDomain
+  component "ArtilleryRulesRegistry\nNationArtilleryRules policies" as Rules
+  component "domain/inputs.py + typed values\nNormal direct-shooting facts only" as DirectInputs
 }
-component "NumPy\nIMPLEMENTED external dependency" as NumPy
+component "NumPy\nlegacy draws + view summaries" as NumPy
 
-Entry --> View : render_inputs / render_results
-Entry --> Controller : calculate
-View --> Model : CombatInput / CombatResult
-Controller --> Model : simulate
-Model --> NumPy : sampling
-View --> NumPy : histogram + mean/min/max
-Inputs --> ToHit
-Inputs --> Firepower
-Service ..> Inputs : future orchestration
-Service ..> Resolvers : future orchestration
-Resolvers ..> Dice : planned injected roll port
+Entry --> NormalView : selected Normal
+Entry --> ArtilleryView : selected Artillery
+Entry --> NormalController
+NormalView --> NormalController : CombatInput
+NormalController --> LegacyModel : simulate
+LegacyModel --> NumPy : binomial sampling
+NormalView --> NumPy : histograms/statistics
+ArtilleryView --> ArtilleryController : ArtilleryCommand
+ArtilleryController --> ArtilleryDomain : calculate_artillery
+ArtilleryDomain --> Rules : for_nation / policy calls
+ArtilleryView --> Rules : available_unit_rules
+DirectInputs ..> LegacyModel : no current application path
 
-note right of Inputs
-No Weapon or Unit identity object.
-No current dependency from legacy MVC
-to these V4 input value types.
+note right of ArtilleryDomain
+Pure exact probability DP; no RNG or NumPy.
+Aggregates equivalent covered-team survivor/morale states
+through bombardment and between-turn transitions.
+end note
+
+note bottom of Rules
+Explicit US, UK, and Japan policy implementations only.
+ToT-on-Repeat is rejected; other nation/weapon rules
+are not inferred and remain outside supported coverage.
 end note
 @enduml

@@ -1,5 +1,5 @@
 @startuml
-title Implemented V1.0.0 domain input structures
+title Implemented direct-shooting input contracts (separate from artillery DP model)
 skinparam classAttributeIconSize 0
 
 class ShootingSituation <<IMPLEMENTED>> {
@@ -69,5 +69,6 @@ Input structures hold user-supplied facts; they do not resolve
 modifiers, allocate hits, select missing save context, or calculate
 probabilities. team_count is optional and can express 12+ Teams.
 No Weapon or Unit identity is modeled or required.
+These are not the inputs consumed by artillery_view or artillery.py.
 end note
 @enduml

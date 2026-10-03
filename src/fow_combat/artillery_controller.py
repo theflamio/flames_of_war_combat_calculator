@@ -1,16 +1,12 @@
-"""Application entry point for Artillery Shooting."""
+"""Application service for exact multi-turn artillery probability results."""
 
 from .artillery import ArtilleryCommand, ArtilleryResult, ArtilleryRulesRegistry, calculate_artillery
-from .domain.dice import DieRoller
 
 
 def calculate_artillery_use_case(
     command: ArtilleryCommand,
     *,
     rules_registry: ArtilleryRulesRegistry,
-    die_roller: DieRoller,
-    trials: int = 10_000,
 ) -> ArtilleryResult:
-    return calculate_artillery(
-        command, rules_registry=rules_registry, die_roller=die_roller, trials=trials
-    )
+    """Resolve a bounded artillery scenario through the domain policy registry."""
+    return calculate_artillery(command, rules_registry=rules_registry)

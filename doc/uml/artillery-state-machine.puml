@@ -1,0 +1,74 @@
+@startuml
+title Artillery exact probability state machine across bounded bombardments
+hide empty description
+skinparam state {
+  BackgroundColor White
+  BorderColor #424242
+}
+
+[*] --> Initialize : ArtilleryCommand validated
+Initialize : Distribution = {input state: 1.0}
+Initialize --> Bombardment : Shooting #1
+
+state "Bombardment transition" as Bombardment {
+  state "Resolve covered Team groups" as Teams
+  state "Update Unit state" as PinAndState
+  Teams : Exact hit probability per Team
+  Teams : • miss → survives, no hit
+  Teams : • hit + successful survival → survives, hit
+  Teams : • hit + failed survival → destroyed, hit
+  Teams --> PinAndState : merge equivalent survivor/hit states
+  PinAndState : covered IC/OOC survivor counts
+  PinAndState : Unit Leader alive; prior losses
+  PinAndState : pin = prior pin OR hits reach policy threshold
+  PinAndState --> [*]
+}
+
+Bombardment --> Report : one ShootingResult summary
+Report : expected survivors; Not In Good Spirits
+Report : Unit/Formation destruction; pinned chance
+Report : remaining-Team-count distribution
+Report --> Stop : horizon reached
+Report --> StartingStep : more shootings remain
+Report --> TerminalUnitDestroyed : no surviving target Teams
+
+state "Between-turn Starting Step" as StartingStep {
+  state "Rally" as Rally
+  state "Unit Good Spirits / Last Stand" as LastStand
+  state "Formation Last Stand" as Formation
+  [*] --> Rally
+  Rally : if pinned, Rally success clears pin
+  Rally : failed Rally preserves pin
+  Rally : Command Leadership may reroll failure
+  LastStand : apply V4 Unit criteria to survivors
+  LastStand : if not In Good Spirits, roll rating
+  LastStand : eligible Command Leadership rerolls failure
+  Rally --> LastStand
+  LastStand --> Formation
+  Formation : if modeled, count target + fixed other extant Units
+  Formation : fewer than 2 → Formation destroyed
+  Formation --> [*]
+}
+
+StartingStep --> TerminalUnitDestroyed : Unit destroyed by Last Stand
+StartingStep --> TerminalFormationDestroyed : Formation destroyed
+StartingStep --> Bombardment : next attack is Repeat Bombardment
+TerminalUnitDestroyed --> Stop
+TerminalFormationDestroyed --> Stop
+Stop --> [*]
+TerminalUnitDestroyed : absorbing state through remaining requested rows
+TerminalFormationDestroyed : absorbing state through remaining requested rows
+
+note right of Bombardment
+For later shootings, To Hit is first attempt
+when the Spotter can see the aiming point;
+otherwise the Repeat +1 applies. Successful
+Infantry saves are re-rolled on a Repeat.
+end note
+
+note bottom of StartingStep
+Repeat eligibility and other roster/In-Command states
+are held as user-confirmed horizon assumptions.
+Time on Target plus Repeat is rejected as unresolved.
+end note
+@enduml

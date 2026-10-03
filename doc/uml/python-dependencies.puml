@@ -1,41 +1,48 @@
 @startuml
-title Actual Python module dependencies (IMPLEMENTED)
+title Actual Python module dependencies — separate normal and artillery paths
 left to right direction
 skinparam componentStyle rectangle
 
 component "app.py" as App
-component "src.fow_combat.view" as View
-component "src.fow_combat.controller" as Controller
-component "src.fow_combat.model" as Model
-package "src.fow_combat.domain" {
-  component "domain.__init__" as DomainInit
+component "src.fow_combat.view" as NormalView
+component "src.fow_combat.controller" as NormalController
+component "src.fow_combat.model" as NormalModel
+component "src.fow_combat.artillery_view" as ArtilleryView
+component "src.fow_combat.artillery_controller" as ArtilleryController
+component "src.fow_combat.artillery" as ArtilleryDomain
+package "src.fow_combat.domain (direct shooting data types)" {
   component "domain.inputs" as Inputs
   component "domain.to_hit" as ToHit
   component "domain.firepower" as Firepower
-  component "domain.dice" as Dice
 }
 component "Streamlit" as Streamlit
 component "NumPy" as NumPy
 
-App --> Controller : imports calculate
-App --> View : imports render_inputs/render_results
-App --> Streamlit : title
-View --> Model : CombatInput / CombatResult
-View --> Streamlit : widgets and layout
-View --> NumPy : arrays and summary stats
-Controller --> Model : types + simulate
-Model --> NumPy : random draws and arrays
-DomainInit --> Inputs
-DomainInit --> ToHit
-DomainInit --> Firepower
-DomainInit --> Dice
+App --> NormalView : imports Normal widgets/rendering
+App --> NormalController : calculate(CombatInput)
+App --> ArtilleryView : selected Artillery route
+NormalView --> NormalController : CombatInput / display result
+NormalController --> NormalModel : simulate
+NormalModel --> NumPy : binomial draws / arrays
+NormalView --> NumPy : histogram / summary statistics
+ArtilleryView --> ArtilleryController : ArtilleryCommand
+ArtilleryView --> ArtilleryDomain : command and result types
+ArtilleryView --> ArtilleryDomain : rules registry options
+ArtilleryController --> ArtilleryDomain : calculate_artillery
+ArtilleryDomain --> ArtilleryDomain : exact state DP / policy lookup
 Inputs --> ToHit
 Inputs --> Firepower
+NormalView --> Streamlit
+ArtilleryView --> Streamlit
+App --> Streamlit
 
-note bottom of DomainInit
-No import edge connects the current legacy MVC
-simulation path to domain input types.
-There are no implemented service, V4 calculation,
-or adapter modules in src/fow_combat.
+note bottom of ArtilleryDomain
+Exact probability propagation is pure Python.
+It uses no NumPy, RNG, or direct-shooting domain input types.
+end note
+
+note bottom of Inputs
+Direct-shooting data contracts remain separate from
+both implemented UI calculation routes.
 end note
 @enduml

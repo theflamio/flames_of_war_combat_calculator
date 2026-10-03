@@ -1,0 +1,54 @@
+@startuml
+title Exact multi-shooting artillery probability sequence
+autonumber
+actor User
+participant "Artillery View" as View
+participant "Artillery Controller" as Controller
+participant "calculate_artillery" as Resolver
+participant "ArtilleryRulesRegistry" as Registry
+participant "Finite probability distribution" as Distribution
+
+User -> View : enter ArtilleryCommand facts
+View -> Registry : available_unit_rules(Shooting Nation, initial Range In)
+Registry --> View : eligible declared Unit-rule options
+View -> Controller : calculate_artillery_use_case(command, registry)
+Controller -> Resolver : calculate_artillery(command, registry)
+Resolver -> Registry : for_nation(command.shooting_nation)
+Registry --> Resolver : nation policy
+Resolver -> Distribution : initialize one input state with probability 1
+
+loop Shooting #1 through horizon
+  alt Shooting #1
+    Resolver -> Distribution : apply initial Range In 1/2/3 To Hit + gun-count and nation rules
+  else Shooting #2+
+    Resolver -> Distribution : apply Repeat To Hit using retained point and spotter LOS
+    Resolver -> Distribution : apply Repeat successful-save re-roll
+  end
+  Distribution -> Distribution : per covered Team: miss / hit survives / hit destroyed
+  Distribution -> Distribution : update pin, team counts, leader and prior-loss state
+  Distribution --> Resolver : merged exact state probabilities
+  Resolver -> Resolver : summarize this shooting row
+  opt another shooting remains in horizon
+    Resolver -> Distribution : Rally transition (if pinned)
+    Resolver -> Distribution : Unit Good Spirits / Last Stand transition
+    Resolver -> Distribution : Formation Last Stand transition when requested
+    Distribution --> Resolver : Starting Step state probabilities
+  end
+end
+
+Resolver --> Controller : ArtilleryResult with ShootingResult per shooting
+Controller --> View : result
+View --> User : exact distributions / morale / pin / destruction outputs
+
+note over Resolver,Distribution
+No random die draws or Monte Carlo trials occur.
+Transitions use exact rational-derived probabilities and merge equal states.
+The horizon is a user-selected project bound, not a V4 maximum.
+end note
+
+note right of Distribution
+ToT on a Repeat is rejected because the rule interaction is unresolved.
+Other nation/weapon rules and changes to roster/In-Command status
+between turns are outside the current model.
+end note
+@enduml

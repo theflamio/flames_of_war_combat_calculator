@@ -1,65 +1,35 @@
 @startuml
-title Intended V1.0.0 calculation flow and implementation status
+title Implemented artillery calculation flow and separate Normal Shooting route
 autonumber
 actor User
-participant "Streamlit View" as View
-participant "Input validation" as Validation
-participant "To Hit" as ToHit
-participant "Hit distribution" as Hits
-participant "Pinning" as Pinning
-participant "Save resolution" as Save
-participant "Firepower" as FP
-participant "Kill calculation" as Kills
-participant "Probability result" as Result
+participant "app.py" as App
+participant "Normal view/controller/model" as Normal
+participant "Artillery View" as View
+participant "Artillery Controller" as Controller
+participant "calculate_artillery" as Resolver
+participant "ArtilleryRulesRegistry" as Registry
 
-User -> View : enter total shots and situation facts
-note right of View
-Current UI instead collects legacy CombatInput.
-Direct ShootingSituation domain values exist,
-but the UI does not use them.
-end note
-View -> Validation : submit situation
-note right of Validation
-IMPLEMENTED: domain dataclasses validate type/range
-for their fields. No application command validator
-or UI-to-domain validation path is implemented.
-end note
-Validation -> ToHit : validated facts
-ToHit -> Hits : To Hit resolution
-note over ToHit,Hits
-UNRESOLVED: applicable modifier aggregation when
-combined requirements exceed specified 8+ handling.
-No V4 To Hit resolver exists.
-end note
-Hits -> Pinning : hit outcomes / distribution
-note over Hits,Pinning
-PLANNED seam; UNRESOLVED hit allocation and mapping
-of shots to target Unit hit counts.
-end note
-Pinning -> Save : eligible hit context
-note right of Pinning
-UNRESOLVED probability pool / cumulative context.
-The 5-hit and at-least-12-Team 8-hit threshold facts
-are specified, but no pinning resolver exists.
-end note
-Save -> FP : save outcome where rule branch requires
-note over Save,FP
-UNRESOLVED: target mapping and complete branch inputs.
-No V4 save or Firepower resolver exists.
-end note
-FP -> Kills : Firepower outcome
-note right of Kills
-UNRESOLVED target hit grouping and outcome mapping.
-No V4 kill calculation exists.
-end note
-Kills -> Result : outcome distribution
-Result -> View : result for presentation
-View --> User : display
-
-note over View,Result
-This is intended sequencing requested for V1.0.0, not a claim
-that all steps or their detailed rule semantics are implemented.
-Current implemented route remains app.py → view.py → controller.py
-→ model.py and produces legacy abstract simulation results.
-end note
+User -> App : choose calculator
+alt Normal Shooting
+  App -> Normal : render inputs / calculate / render results
+  Normal --> App : legacy abstract CombatResult
+else Artillery Shooting
+  App -> View : render_page()
+  View -> Registry : available_unit_rules(nation, initial_range_in)
+  Registry --> View : generic rule options
+  User -> View : enter Unit roster, values, horizon, options
+  View -> Controller : calculate_artillery_use_case(command, registry)
+  Controller -> Resolver : calculate_artillery(command, registry)
+  Resolver -> Registry : for_nation(shooting_nation)
+  Registry --> Resolver : NationArtilleryRules policy
+  Resolver -> Resolver : exact state distribution for Shooting #1
+  loop each later shooting through bounded horizon
+    Resolver -> Resolver : Starting Step: Rally → Unit Last Stand → Formation Last Stand
+    Resolver -> Resolver : exact Repeat Bombardment transitions
+    Resolver -> Resolver : aggregate per-shooting metrics/distribution
+  end
+  Resolver --> Controller : ArtilleryResult(shootings)
+  Controller --> View : ArtilleryResult
+  View --> User : exact per-shooting results + scope limitations
+end
 @enduml

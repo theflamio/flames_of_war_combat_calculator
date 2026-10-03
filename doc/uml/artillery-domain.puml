@@ -1,0 +1,114 @@
+@startuml
+title Artillery exact probability domain and nation policy boundary
+skinparam classAttributeIconSize 0
+
+class ArtilleryCommand <<input>> {
+  +shooting_nation: ShootingNation
+  +infantry_teams_under_template: int
+  +in_command_teams_under_template: int
+  +infantry_teams_outside_template: int
+  +in_command_infantry_outside_template: int
+  +gun_teams_in_unit / in_command_gun_teams: int
+  +unit_initial_infantry_and_gun_teams: int
+  +unit_has_prior_casualty_or_bailed_team: bool
+  +unit_leader_present / under_template / in_command: bool
+  +guns_firing: int
+  +artillery_to_hit: int
+  +firepower: int
+  +range_in: RangeIn (initial 1/2/3)
+  +repeat_spotter_can_see_aiming_point: bool
+  +horizon: int
+  +dug_in: bool; infantry_save: 3
+  +rally / last_stand ratings
+  +command_leadership: bool
+  +part_of_formation: bool
+  +other_extant_formation_units: int
+  +assume_battery_remains_eligible: bool
+  +selected_rules: frozenset[ArtilleryRule]
+}
+
+class _State <<internal DP key>> {
+  +covered_in_command: int
+  +covered_out_of_command: int
+  +leader_alive: bool
+  +pinned: bool
+  +has_prior_losses: bool
+  +unit_destroyed: bool
+  +formation_destroyed: bool
+}
+
+class ShootingResult <<exact summary after shooting i>> {
+  +shooting_number: int
+  +expected_teams_remaining: float
+  +bad_spirit_probability: float
+  +destroyed_probability: float
+  +formation_destroyed_probability: float | None
+  +pinned_probability: float
+  +team_count_distribution: (count, probability)*
+  +resolved_to_hit: int
+}
+
+class ArtilleryResult <<aggregate output>> {
+  +shooting_nation: ShootingNation
+  +firepower_profile / adjusted_firepower: int
+  +shootings: tuple[ShootingResult, ...]
+  +used_rule_branches: tuple[str, ...]
+  +incomplete_items: tuple[str, ...]
+}
+
+class ArtilleryResolver {
+  +calculate_artillery(command, rules_registry): ArtilleryResult
+}
+
+interface NationArtilleryRules {
+  +available_unit_rules(range_in): ArtilleryRuleOption*
+  +successful_hit_reroll(command, shooting_number): bool
+  +failed_hit_reroll(command): bool
+  +reroll_successful_saves(command, shooting_number): bool
+  +hits_required_to_pin(command): int
+}
+
+class ArtilleryRulesRegistry {
+  +for_nation(nation): NationArtilleryRules
+  +available_unit_rules(nation, range_in): ArtilleryRuleOption*
+}
+
+enum ShootingNation {
+  UNITED_STATES
+  UNITED_KINGDOM
+  JAPAN
+}
+enum RangeIn {
+  FIRST
+  SECOND
+  THIRD
+  REPEAT (rejected as initial scenario state)
+}
+enum ArtilleryRule {
+  TIME_ON_TARGET
+  FIRE_BURSTS
+  BANNERS
+}
+
+ArtilleryCommand --> ShootingNation
+ArtilleryCommand --> RangeIn
+ArtilleryCommand --> ArtilleryRule
+ArtilleryResolver --> ArtilleryCommand
+ArtilleryResolver --> ArtilleryRulesRegistry : select policy by firing nation
+ArtilleryRulesRegistry ..> NationArtilleryRules : returns policy
+ArtilleryResolver ..> _State : initializes exact distribution
+_State --> ShootingResult : aggregate/merge probabilities
+ArtilleryResult *-- ShootingResult
+
+note bottom of _State
+Uncovered Infantry and Gun Teams are fixed roster counts
+from the command; covered survivors are tracked by
+In-Command group and Unit Leader survival.
+end note
+
+note bottom of NationArtilleryRules
+Selected Unit rules are explicit user declarations.
+The UI renders registry options generically.
+No fallback policy or target nation exists.
+end note
+@enduml

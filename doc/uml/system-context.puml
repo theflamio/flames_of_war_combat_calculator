@@ -5,27 +5,32 @@ skinparam componentStyle rectangle
 
 actor User
 rectangle "Flames of War Combat Calculator" {
-  component "Streamlit application\n(app.py + view.py)\nIMPLEMENTED: legacy UI" as App
-  component "Legacy abstract simulation\n(model.py + controller.py)\nIMPLEMENTED" as Legacy
-  component "V1.0.0 shooting situation\ndomain input types\nIMPLEMENTED: data contracts only" as Domain
-  component "V4 probability resolution\nPLANNED / UNRESOLVED" as V4
+  component "Streamlit application\n(app.py navigation)\nIMPLEMENTED" as App
+  component "Normal Shooting\nview → controller → legacy model\nIMPLEMENTED: abstract binomial chain" as Normal
+  component "Artillery Shooting\nview → controller → exact state engine\nIMPLEMENTED: bounded Infantry model" as Artillery
+  component "Artillery policy registry\nUS / UK / Japan supported options" as Policies
 }
-cloud "Python runtime" as Python
-database "NumPy\nrandom sampling + arrays" as NumPy
+database "NumPy\nnormal simulation + presentation stats" as NumPy
 
-User --> App : enters legacy controls / views results
-App --> Legacy : CombatInput; calculate
-Legacy --> App : CombatResult
-App --> Domain : no current call path
-Domain ..> V4 : intended input foundation
-V4 ..> App : future result integration
-Legacy --> NumPy : simulation draws
-App --> NumPy : histogram/statistics
-Legacy ..> Python
-App ..> Python
+User --> App : select calculator / enter facts
+App --> Normal : Normal Shooting route
+App --> Artillery : Artillery Shooting route
+Normal --> App : legacy CombatResult
+Artillery --> Policies : selected Shooting Nation
+Policies --> Artillery : verified policy operations
+Artillery --> App : per-shooting probability summaries
+Normal --> NumPy : binomial simulation
+App --> NumPy : normal view histograms / statistics
 
-note bottom of V4
-No implemented V4 calculator consumes ShootingSituation.
-No weapon/unit database or identity service exists or is required.
+note bottom of Normal
+Existing normal behavior remains a separate legacy calculator.
+No V4 direct-fire resolver is implemented by this path.
+end note
+
+note bottom of Artillery
+Exact probability-state transitions cover a user-entered
+finite horizon; no random sampling is used in the domain.
+The model is limited to an Infantry target Unit and one battery.
+ToT on a Repeat and unlisted weapon/nation rules are unavailable.
 end note
 @enduml
